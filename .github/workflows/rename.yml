@@ -12,40 +12,34 @@ jobs:
         with:
           fetch-depth: 0  # Required for rename detection
 
-      - name: Detect renames
-        id: detect-renames
-        run: |
-          # For push events
-          if [ "${{ github.event_name }}" = "push" ]; then
-            DIFF_CMD="git diff --name-status --find-renames=80% ${{ github.event.before }} ${{ github.sha }}"
-          
-          # For pull requests
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            DIFF_CMD="git diff --name-status --find-renames=80% ${{ github.base_ref }} HEAD"
-          
-          else
-            echo "Unsupported event type" && exit 1
-          fi
-
-          # Capture renames (old_path > new_path format)
-          RENAMES=$($DIFF_CMD | grep '^R' | awk '{print $2 ">" $3}')
-          echo "renames=${RENAMES}" >> $GITHUB_OUTPUT
+          - name: Detect renames
+          id: detect-renames
+          run: |
+            # Safely handle spaces in filenames
+            git config --global core.quotepath false
+        
+            if [ "${{ github.event_name }}" = "push" ]; then
+              DIFF_CMD="git diff --name-status --find-renames=80% --no-renames ${{ github.event.before }} ${{ github.sha }}"
+            elif [ "${{ github.event_name }}" = "pull_request" ]; then
+              DIFF_CMD="git diff --name-status --find-renames=80% origin/${{ github.base_ref }} HEAD"
+            else
+              echo "::error::Unsupported event: ${{ github.event_name }}" >&2
+              exit 1
+            fi
+        
+            # Handle spaces and multi-line output correctly
+            echo "RENAMES<<EOF" >> $GITHUB_ENV
+            $DIFF_CMD | grep '^R' | while read -r status old new; do
+              echo "${old}>${new}"  # Preserve spaces in paths
+            done >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+        
+            # Set output with proper delimiter
+            RENAMES_STR=$(cat <<< "$RENAMES" | tr '\n' '|')
+            echo "renames=$RENAMES_STR" >> $GITHUB_OUTPUT
 
       - name: Process renames
         if: ${{ steps.detect-renames.outputs.renames != '' }}
         run: |
           echo "Found renames:"
           echo "${{ steps.detect-renames.outputs.renames }}"
-          
-          # Split into individual pairs
-          echo "${{ steps.detect-renames.outputs.renames }}" | tr ' ' '\n' | while read pair; do
-            old="${pair%>*}"
-            new="${pair#*>}"
-            
-            # Your custom logic here
-            echo "Renamed: $old → $new"
-            
-            # Example: Update metadata registry
-            jq ".[\"$new\"] = .[\"$old\"] | del(.[\"$old\"])" metadata.json > temp.json
-            mv temp.json metadata.json
-          done
