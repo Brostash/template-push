@@ -12,9 +12,9 @@ jobs:
         with:
           fetch-depth: 0  # Required for rename detection
 
-          - name: Detect renames
-          id: detect-renames
-          run: |
+      - name: Detect renames
+        id: detect-renames
+        run: |
             # Safely handle spaces in filenames
             git config --global core.quotepath false
         
